@@ -35,8 +35,12 @@
             from.addEventListener('scroll', function () {
                 if (syncing) return;
                 syncing = true;
-                to.scrollTop = from.scrollTop;
-                to.scrollLeft = from.scrollLeft;
+                // scroll-behavior:smooth on .diff-col also applies to plain
+                // scrollTop/scrollLeft assignment, not just scrollTo()/
+                // scrollIntoView() - without forcing 'instant' here, the
+                // follower column would animate its catch-up on every
+                // scroll event and visibly lag behind the one being dragged.
+                to.scrollTo({ top: from.scrollTop, left: from.scrollLeft, behavior: 'instant' });
                 syncing = false;
             });
         };
