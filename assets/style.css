@@ -11,6 +11,9 @@
     --mod: #4a3a1a;
     --mark-del: #7a3338;
     --mark-ins: #2e5c3e;
+    --minimap-mod: #f5c451;
+    --minimap-del: #f28b82;
+    --minimap-ins: #7fd99a;
 }
 
 * { box-sizing: border-box; }
@@ -28,60 +31,7 @@ body {
 .topbar h1 { margin: 0; font-size: 22px; }
 .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
 
-form#compare-form { padding: 0 24px; }
-
-.panes {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    margin-top: 12px;
-}
-
-.pane-input {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.pane-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 10px;
-    background: #2c2d31;
-    border-bottom: 1px solid var(--border);
-    font-size: 13px;
-    color: var(--muted);
-}
-
-.file-btn {
-    margin-left: auto;
-    background: #35363b;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 10px;
-    cursor: pointer;
-    font-size: 12px;
-    color: var(--text);
-}
-.file-btn input { display: none; }
-
-textarea {
-    width: 100%;
-    min-height: 220px;
-    resize: vertical;
-    border: none;
-    outline: none;
-    background: var(--panel);
-    color: var(--text);
-    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    padding: 10px;
-}
+form#compare-form { padding: 0 24px 24px; }
 
 .options {
     display: flex;
@@ -109,18 +59,6 @@ textarea {
     border: 1px solid var(--border);
 }
 
-.error {
-    margin: 16px 24px;
-    color: #f28b82;
-}
-
-.stats {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 24px 8px;
-    flex-wrap: wrap;
-}
 .badge {
     font-size: 12px;
     padding: 4px 10px;
@@ -131,27 +69,101 @@ textarea {
 .badge-mod { color: #f5c451; }
 .badge-del { color: #f28b82; }
 .badge-ins { color: #7fd99a; }
-.wrap-toggle { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
 
-.diff-view {
+.error {
+    margin: 0 0 12px;
+    color: #f28b82;
+}
+
+.panes {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1px;
-    background: var(--border);
-    margin: 0 24px 32px;
+    gap: 12px;
+}
+
+.pane {
+    background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
+}
+
+.pane-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #2c2d31;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.file-btn, .edit-btn {
+    background: #35363b;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text);
+}
+.file-btn { margin-left: auto; }
+.edit-btn { margin-left: auto; }
+.file-btn input { display: none; }
+
+textarea {
+    width: 100%;
+    min-height: 220px;
+    resize: vertical;
+    border: none;
+    outline: none;
+    background: var(--panel);
+    color: var(--text);
+    font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 10px;
+}
+textarea.is-hidden { display: none; }
+.diff-wrap.is-hidden { display: none; }
+
+.diff-wrap {
+    position: relative;
 }
 
 .diff-col {
     background: var(--panel);
     overflow-x: auto;
-    max-height: 70vh;
     overflow-y: auto;
+    max-height: 70vh;
     font-family: "Cascadia Code", Consolas, "Courier New", monospace;
     font-size: 13px;
 }
+
+/* Overview strip docked over the column's own scrollbar, marking where the
+   changes are across the whole file. pointer-events:none lets clicks/drags
+   pass through to the real scrollbar underneath. */
+.diff-minimap {
+    position: absolute;
+    top: 0;
+    right: 1px;
+    width: 7px;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+}
+.diff-minimap .mark {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-radius: 1px;
+}
+.diff-minimap .mark-mod { background: var(--minimap-mod); }
+.diff-minimap .mark-del { background: var(--minimap-del); }
+.diff-minimap .mark-ins { background: var(--minimap-ins); }
 
 .diff-row {
     display: flex;
@@ -159,7 +171,7 @@ textarea {
     min-height: 20px;
     border-bottom: 1px solid rgba(255,255,255,0.02);
 }
-.diff-view.wrap .diff-row { white-space: pre-wrap; word-break: break-word; }
+body.wrap-lines .diff-row { white-space: pre-wrap; word-break: break-word; }
 
 .lineno {
     flex: 0 0 44px;
@@ -204,7 +216,7 @@ mark {
         --mark-ins: #a8e0b7;
     }
     .pane-head { background: #f0f1f3; }
-    .file-btn { background: #eceef1; }
+    .file-btn, .edit-btn { background: #eceef1; }
     .compare-btn { color: #fff; }
     .row-blank { background: repeating-linear-gradient(45deg, #eceef1, #eceef1 6px, #ffffff 6px, #ffffff 12px); }
 }

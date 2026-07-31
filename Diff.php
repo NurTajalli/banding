@@ -8,7 +8,11 @@ declare(strict_types=1);
  */
 final class Diff
 {
-    private const MAX_CELLS = 6_000_000; // guard against pathological O(n*m) blowup
+    // Caps the Myers edit-distance search window. Memory/time scale with this
+    // cap, not with file size, so huge-but-mostly-similar files stay fast; if
+    // the true edit distance exceeds it (files are almost entirely different),
+    // we fall back to a single replace block instead of exhausting memory.
+    private const MAX_EDIT_DISTANCE = 2000;
 
     /**
      * @return array<int, array{tag:string,left:array,right:array}>
@@ -172,54 +176,20 @@ final class Diff
             return [['delete', $aStart, $aEnd, $bStart, $bStart]];
         }
 
-        if (($n + 1) * ($m + 1) > self::MAX_CELLS) {
-            // Fallback for huge inputs: treat the whole differing region as one
-            // replace block rather than exhausting memory on the DP table.
+        $tags = self::myers($a, $b, $aStart, $aEnd, $bStart, $bEnd, self::MAX_EDIT_DISTANCE);
+        if ($tags === null) {
+            // True edit distance exceeds the cap (files are almost entirely
+            // different) - treat the whole differing region as one replace
+            // block rather than exhausting memory/time chasing it exactly.
             return [['replace', $aStart, $aEnd, $bStart, $bEnd]];
         }
 
-        $width = $m + 1;
-        $dp = new SplFixedArray(($n + 1) * $width);
-        for ($j = 0; $j <= $m; $j++) {
-            $dp[$j] = 0;
-        }
-        for ($i = 1; $i <= $n; $i++) {
-            $dp[$i * $width] = 0;
-            for ($j = 1; $j <= $m; $j++) {
-                if ($a[$aStart + $i - 1] === $b[$bStart + $j - 1]) {
-                    $dp[$i * $width + $j] = $dp[($i - 1) * $width + ($j - 1)] + 1;
-                } else {
-                    $up = $dp[($i - 1) * $width + $j];
-                    $left = $dp[$i * $width + ($j - 1)];
-                    $dp[$i * $width + $j] = $up >= $left ? $up : $left;
-                }
-            }
-        }
-
-        // Backtrack to a raw tag sequence (equal/insert/delete), then walk it
-        // forward with running cursors to build compressed [tag,i1,i2,j1,j2] ranges.
-        $rawTags = [];
-        $i = $n;
-        $j = $m;
-        while ($i > 0 || $j > 0) {
-            if ($i > 0 && $j > 0 && $a[$aStart + $i - 1] === $b[$bStart + $j - 1]) {
-                $rawTags[] = 'equal';
-                $i--;
-                $j--;
-            } elseif ($j > 0 && ($i === 0 || $dp[$i * $width + ($j - 1)] >= $dp[($i - 1) * $width + $j])) {
-                $rawTags[] = 'insert';
-                $j--;
-            } else {
-                $rawTags[] = 'delete';
-                $i--;
-            }
-        }
-        $rawTags = array_reverse($rawTags);
-
+        // Walk the tag sequence forward with running cursors to build
+        // compressed [tag,i1,i2,j1,j2] ranges.
         $ops = [];
         $ai = $aStart;
         $bj = $bStart;
-        foreach ($rawTags as $tag) {
+        foreach ($tags as $tag) {
             $ai2 = $ai + ($tag === 'insert' ? 0 : 1);
             $bj2 = $bj + ($tag === 'delete' ? 0 : 1);
 
@@ -240,6 +210,101 @@ final class Diff
             $result[] = [$o['tag'], $o['i1'], $o['i2'], $o['j1'], $o['j2']];
         }
         return $result;
+    }
+
+    /**
+     * Myers' O((N+M)D) shortest-edit-script algorithm. Returns a flat list of
+     * per-element tags ('equal'|'insert'|'delete') from aStart..aEnd /
+     * bStart..bEnd, or null if the true edit distance exceeds $maxDCap.
+     *
+     * The search window is sized to $maxDCap rather than to $n+$m, so memory
+     * use is bounded by the cap regardless of how large the inputs are.
+     */
+    private static function myers(array $a, array $b, int $aStart, int $aEnd, int $bStart, int $bEnd, int $maxDCap): ?array
+    {
+        $n = $aEnd - $aStart;
+        $m = $bEnd - $bStart;
+        $maxD = min($n + $m, $maxDCap);
+        // Sized to the actual bound in play (small for short lines in
+        // word-diff, capped for huge line-diff inputs) rather than always to
+        // $maxDCap, so small comparisons don't pay for a 2*maxDCap+1 allocation.
+        $offset = $maxD;
+        $width = 2 * $maxD + 1;
+
+        $v = new SplFixedArray($width);
+        for ($idx = 0; $idx < $width; $idx++) {
+            $v[$idx] = 0;
+        }
+
+        $trace = [];
+        $foundD = null;
+
+        for ($d = 0; $d <= $maxD; $d++) {
+            $snapshot = new SplFixedArray($width);
+            for ($idx = 0; $idx < $width; $idx++) {
+                $snapshot[$idx] = $v[$idx];
+            }
+            $trace[] = $snapshot;
+
+            for ($k = -$d; $k <= $d; $k += 2) {
+                if ($k === -$d || ($k !== $d && $v[$k - 1 + $offset] < $v[$k + 1 + $offset])) {
+                    $x = $v[$k + 1 + $offset];
+                } else {
+                    $x = $v[$k - 1 + $offset] + 1;
+                }
+                $y = $x - $k;
+
+                while ($x < $n && $y < $m && $a[$aStart + $x] === $b[$bStart + $y]) {
+                    $x++;
+                    $y++;
+                }
+
+                $v[$k + $offset] = $x;
+
+                if ($x >= $n && $y >= $m) {
+                    $foundD = $d;
+                    break 2;
+                }
+            }
+        }
+
+        if ($foundD === null) {
+            return null;
+        }
+
+        // Backtrack through the trace to recover the tag sequence.
+        $x = $n;
+        $y = $m;
+        $tags = [];
+        for ($d = count($trace) - 1; $d >= 0; $d--) {
+            $vv = $trace[$d];
+            $k = $x - $y;
+
+            if ($k === -$d || ($k !== $d && $vv[$k - 1 + $offset] < $vv[$k + 1 + $offset])) {
+                $prevK = $k + 1;
+            } else {
+                $prevK = $k - 1;
+            }
+            $prevX = $vv[$prevK + $offset];
+            $prevY = $prevX - $prevK;
+
+            while ($x > $prevX && $y > $prevY) {
+                $tags[] = 'equal';
+                $x--;
+                $y--;
+            }
+            if ($d > 0) {
+                if ($x === $prevX) {
+                    $tags[] = 'insert';
+                    $y--;
+                } else {
+                    $tags[] = 'delete';
+                    $x--;
+                }
+            }
+        }
+
+        return array_reverse($tags);
     }
 
     /** Merge an adjacent delete+insert (in either order) into a single replace op. */

@@ -45,10 +45,21 @@
     }
 
     var wrapToggle = document.getElementById('wrap-toggle');
-    var diffView = document.getElementById('diff-view');
-    if (wrapToggle && diffView) {
+    if (wrapToggle) {
         wrapToggle.addEventListener('change', function () {
-            diffView.classList.toggle('wrap', wrapToggle.checked);
+            document.body.classList.toggle('wrap-lines', wrapToggle.checked);
         });
     }
+
+    // "Edit" switches a pane back from the diff view to its raw textarea.
+    document.querySelectorAll('.edit-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var pane = document.getElementById(btn.getAttribute('data-target'));
+            if (!pane) return;
+            var textarea = pane.querySelector('textarea');
+            var diffWrap = pane.querySelector('.diff-wrap');
+            if (textarea) textarea.classList.remove('is-hidden');
+            if (diffWrap) diffWrap.classList.add('is-hidden');
+        });
+    });
 })();
