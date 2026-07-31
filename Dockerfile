@@ -1,10 +1,12 @@
-FROM php:8.2-cli
+FROM php:8.2-apache
 
-WORKDIR /app
-COPY . .
+COPY . /var/www/html/
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Render/Railway inject the port to bind at runtime via $PORT.
+# Render/Railway inject the real port to bind at runtime via $PORT;
+# the entrypoint rewrites Apache's config to listen on it before starting.
 ENV PORT=8080
 EXPOSE 8080
 
-CMD ["sh", "-c", "php -S 0.0.0.0:${PORT} -t ."]
+ENTRYPOINT ["docker-entrypoint.sh"]
