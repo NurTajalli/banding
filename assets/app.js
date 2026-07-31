@@ -75,7 +75,11 @@
 
         var jumpTo = function (el) {
             if (!el) return;
-            el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            // Instant, not smooth: on large files the jump distance can be
+            // tens of thousands of pixels, where a smooth animation takes
+            // several seconds and can look like nothing happened. The pink
+            // flash below is what gives the "you landed here" feedback.
+            el.scrollIntoView({ block: 'start', behavior: 'instant' });
             flash(el);
             flash(document.getElementById('hunk-right-' + el.id.replace('hunk-left-', '')));
         };

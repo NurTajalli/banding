@@ -174,7 +174,6 @@ textarea.is-hidden { display: none; }
     max-height: 70vh;
     font-family: "Cascadia Code", Consolas, "Courier New", monospace;
     font-size: 13px;
-    scroll-behavior: smooth;
 }
 
 /* Overview strip docked over the column's own scrollbar, marking where the
