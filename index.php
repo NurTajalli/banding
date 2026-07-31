@@ -151,8 +151,7 @@ function renderMinimap(array $minimap, int $totalRows): string
 </head>
 <body>
 <header class="topbar">
-    <h1>PHP Code Compare</h1>
-    <p class="subtitle">Side-by-side diff for PHP, HTML, CSS &amp; JS source &mdash; no install required.</p>
+    <h1>BANDING: CODE COMPARE</h1>
 </header>
 
 <form method="post" enctype="multipart/form-data" id="compare-form">
