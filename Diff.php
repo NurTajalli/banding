@@ -1,0 +1,269 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Dependency-free line + word level diff engine (LCS based, WinMerge-style output).
+ * Works on any text content (PHP/HTML/CSS/JS mixed files) since it only ever
+ * sees raw lines/characters - it never parses or executes the code.
+ */
+final class Diff
+{
+    private const MAX_CELLS = 6_000_000; // guard against pathological O(n*m) blowup
+
+    /**
+     * @return array<int, array{tag:string,left:array,right:array}>
+     *   tag is one of: equal, replace, delete, insert
+     *   left/right are arrays of ['no'=>lineNumberOrNull,'text'=>string]
+     */
+    public static function compareLines(string $oldText, string $newText, array $opts): array
+    {
+        $a = self::splitLines($oldText);
+        $b = self::splitLines($newText);
+
+        $normA = array_map(fn($l) => self::normalize($l, $opts), $a);
+        $normB = array_map(fn($l) => self::normalize($l, $opts), $b);
+
+        if ($opts['ignore_blank_lines']) {
+            [$a, $normA] = self::dropBlank($a, $normA);
+            [$b, $normB] = self::dropBlank($b, $normB);
+        }
+
+        $opcodes = self::opcodes($normA, $normB);
+
+        $out = [];
+        foreach ($opcodes as [$tag, $i1, $i2, $j1, $j2]) {
+            $left = [];
+            $right = [];
+            for ($i = $i1; $i < $i2; $i++) {
+                $left[] = ['no' => $a[$i]['no'], 'text' => $a[$i]['text']];
+            }
+            for ($j = $j1; $j < $j2; $j++) {
+                $right[] = ['no' => $b[$j]['no'], 'text' => $b[$j]['text']];
+            }
+            $out[] = ['tag' => $tag, 'left' => $left, 'right' => $right];
+        }
+
+        return $out;
+    }
+
+    /** Word-level diff between two single lines, returns [leftSegments, rightSegments]. */
+    public static function compareWords(string $oldLine, string $newLine): array
+    {
+        $a = self::tokenize($oldLine);
+        $b = self::tokenize($newLine);
+
+        $opcodes = self::opcodes($a, $b);
+
+        $left = [];
+        $right = [];
+        foreach ($opcodes as [$tag, $i1, $i2, $j1, $j2]) {
+            $leftText = implode('', array_slice($a, $i1, $i2 - $i1));
+            $rightText = implode('', array_slice($b, $j1, $j2 - $j1));
+            if ($tag === 'equal') {
+                $left[] = ['tag' => 'equal', 'text' => $leftText];
+                $right[] = ['tag' => 'equal', 'text' => $rightText];
+            } else {
+                if ($leftText !== '') {
+                    $left[] = ['tag' => 'diff', 'text' => $leftText];
+                }
+                if ($rightText !== '') {
+                    $right[] = ['tag' => 'diff', 'text' => $rightText];
+                }
+            }
+        }
+
+        return [$left, $right];
+    }
+
+    /** @return list<array{no:int,text:string}> */
+    private static function splitLines(string $text): array
+    {
+        $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $lines = $text === '' ? [] : explode("\n", $text);
+        $out = [];
+        foreach ($lines as $idx => $line) {
+            $out[] = ['no' => $idx + 1, 'text' => $line];
+        }
+        return $out;
+    }
+
+    private static function dropBlank(array $lines, array $norm): array
+    {
+        $l2 = [];
+        $n2 = [];
+        foreach ($lines as $k => $line) {
+            if (trim($norm[$k]) === '') {
+                continue;
+            }
+            $l2[] = $line;
+            $n2[] = $norm[$k];
+        }
+        return [array_values($l2), array_values($n2)];
+    }
+
+    private static function normalize(array $line, array $opts): string
+    {
+        $t = $line['text'];
+        if ($opts['ignore_case']) {
+            $t = function_exists('mb_strtolower') ? mb_strtolower($t) : strtolower($t);
+        }
+        if ($opts['ignore_whitespace']) {
+            $t = trim(preg_replace('/\s+/', ' ', $t));
+        }
+        return $t;
+    }
+
+    /** Split a line into tokens (runs of word chars, runs of whitespace, or single punctuation chars). */
+    private static function tokenize(string $line): array
+    {
+        preg_match_all('/[A-Za-z0-9_]+|\s+|./su', $line, $m);
+        return $m[0];
+    }
+
+    /**
+     * Longest-common-subsequence based opcode generator, mirroring the shape of
+     * Python's difflib.SequenceMatcher.get_opcodes(): a list of
+     * [tag, i1, i2, j1, j2] over arbitrary comparable arrays $a and $b.
+     */
+    private static function opcodes(array $a, array $b): array
+    {
+        $n = count($a);
+        $m = count($b);
+
+        // Trim common prefix/suffix first - keeps the O(n*m) core small even
+        // when the two files are long but mostly identical.
+        $start = 0;
+        while ($start < $n && $start < $m && $a[$start] === $b[$start]) {
+            $start++;
+        }
+        $endA = $n;
+        $endB = $m;
+        while ($endA > $start && $endB > $start && $a[$endA - 1] === $b[$endB - 1]) {
+            $endA--;
+            $endB--;
+        }
+
+        $ops = [];
+        if ($start > 0) {
+            $ops[] = ['equal', 0, $start, 0, $start];
+        }
+
+        $ops = array_merge($ops, self::lcsOpcodes($a, $b, $start, $endA, $start, $endB));
+
+        if ($endA < $n) {
+            $ops[] = ['equal', $endA, $n, $endB, $m];
+        }
+
+        return self::mergeReplace($ops);
+    }
+
+    private static function lcsOpcodes(array $a, array $b, int $aStart, int $aEnd, int $bStart, int $bEnd): array
+    {
+        $n = $aEnd - $aStart;
+        $m = $bEnd - $bStart;
+
+        if ($n === 0 && $m === 0) {
+            return [];
+        }
+        if ($n === 0) {
+            return [['insert', $aStart, $aStart, $bStart, $bEnd]];
+        }
+        if ($m === 0) {
+            return [['delete', $aStart, $aEnd, $bStart, $bStart]];
+        }
+
+        if (($n + 1) * ($m + 1) > self::MAX_CELLS) {
+            // Fallback for huge inputs: treat the whole differing region as one
+            // replace block rather than exhausting memory on the DP table.
+            return [['replace', $aStart, $aEnd, $bStart, $bEnd]];
+        }
+
+        $width = $m + 1;
+        $dp = new SplFixedArray(($n + 1) * $width);
+        for ($j = 0; $j <= $m; $j++) {
+            $dp[$j] = 0;
+        }
+        for ($i = 1; $i <= $n; $i++) {
+            $dp[$i * $width] = 0;
+            for ($j = 1; $j <= $m; $j++) {
+                if ($a[$aStart + $i - 1] === $b[$bStart + $j - 1]) {
+                    $dp[$i * $width + $j] = $dp[($i - 1) * $width + ($j - 1)] + 1;
+                } else {
+                    $up = $dp[($i - 1) * $width + $j];
+                    $left = $dp[$i * $width + ($j - 1)];
+                    $dp[$i * $width + $j] = $up >= $left ? $up : $left;
+                }
+            }
+        }
+
+        // Backtrack to a raw tag sequence (equal/insert/delete), then walk it
+        // forward with running cursors to build compressed [tag,i1,i2,j1,j2] ranges.
+        $rawTags = [];
+        $i = $n;
+        $j = $m;
+        while ($i > 0 || $j > 0) {
+            if ($i > 0 && $j > 0 && $a[$aStart + $i - 1] === $b[$bStart + $j - 1]) {
+                $rawTags[] = 'equal';
+                $i--;
+                $j--;
+            } elseif ($j > 0 && ($i === 0 || $dp[$i * $width + ($j - 1)] >= $dp[($i - 1) * $width + $j])) {
+                $rawTags[] = 'insert';
+                $j--;
+            } else {
+                $rawTags[] = 'delete';
+                $i--;
+            }
+        }
+        $rawTags = array_reverse($rawTags);
+
+        $ops = [];
+        $ai = $aStart;
+        $bj = $bStart;
+        foreach ($rawTags as $tag) {
+            $ai2 = $ai + ($tag === 'insert' ? 0 : 1);
+            $bj2 = $bj + ($tag === 'delete' ? 0 : 1);
+
+            $lastKey = array_key_last($ops);
+            if ($lastKey !== null && $ops[$lastKey]['tag'] === $tag) {
+                $ops[$lastKey]['i2'] = $ai2;
+                $ops[$lastKey]['j2'] = $bj2;
+            } else {
+                $ops[] = ['tag' => $tag, 'i1' => $ai, 'i2' => $ai2, 'j1' => $bj, 'j2' => $bj2];
+            }
+
+            $ai = $ai2;
+            $bj = $bj2;
+        }
+
+        $result = [];
+        foreach ($ops as $o) {
+            $result[] = [$o['tag'], $o['i1'], $o['i2'], $o['j1'], $o['j2']];
+        }
+        return $result;
+    }
+
+    /** Merge an adjacent delete+insert (in either order) into a single replace op. */
+    private static function mergeReplace(array $ops): array
+    {
+        $out = [];
+        $i = 0;
+        $count = count($ops);
+        while ($i < $count) {
+            $cur = $ops[$i];
+            if ($i + 1 < $count) {
+                $next = $ops[$i + 1];
+                $pair = [$cur[0], $next[0]];
+                if ($pair === ['delete', 'insert'] || $pair === ['insert', 'delete']) {
+                    $del = $cur[0] === 'delete' ? $cur : $next;
+                    $ins = $cur[0] === 'insert' ? $cur : $next;
+                    $out[] = ['replace', $del[1], $del[2], $ins[3], $ins[4]];
+                    $i += 2;
+                    continue;
+                }
+            }
+            $out[] = $cur;
+            $i++;
+        }
+        return $out;
+    }
+}
