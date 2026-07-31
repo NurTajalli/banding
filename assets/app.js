@@ -51,6 +51,49 @@
         });
     }
 
+    // Prev/Next diff navigation. The server marks the first row of each
+    // change block with id="hunk-left-N" / "hunk-right-N" (N = hunk index,
+    // shared between the two columns). Navigation is position-aware (based
+    // on current scroll position, not a stored counter) so it stays correct
+    // even if the user scrolls manually in between clicks.
+    var prevBtn = document.getElementById('prev-diff-btn');
+    var nextBtn = document.getElementById('next-diff-btn');
+    if ((prevBtn || nextBtn) && colLeft) {
+        var hunkEls = Array.prototype.slice.call(colLeft.querySelectorAll('[id^="hunk-left-"]'));
+
+        var flash = function (el) {
+            if (!el) return;
+            el.classList.remove('jump-flash');
+            void el.offsetWidth; // restart the animation if the same row is hit again
+            el.classList.add('jump-flash');
+            setTimeout(function () { el.classList.remove('jump-flash'); }, 900);
+        };
+
+        var jumpTo = function (el) {
+            if (!el) return;
+            el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            flash(el);
+            flash(document.getElementById('hunk-right-' + el.id.replace('hunk-left-', '')));
+        };
+
+        if (nextBtn) {
+            nextBtn.addEventListener('click', function () {
+                var top = colLeft.scrollTop + 2;
+                for (var i = 0; i < hunkEls.length; i++) {
+                    if (hunkEls[i].offsetTop > top) { jumpTo(hunkEls[i]); return; }
+                }
+            });
+        }
+        if (prevBtn) {
+            prevBtn.addEventListener('click', function () {
+                var top = colLeft.scrollTop - 2;
+                for (var i = hunkEls.length - 1; i >= 0; i--) {
+                    if (hunkEls[i].offsetTop < top) { jumpTo(hunkEls[i]); return; }
+                }
+            });
+        }
+    }
+
     // "Edit" switches a pane back from the diff view to its raw textarea.
     document.querySelectorAll('.edit-btn').forEach(function (btn) {
         btn.addEventListener('click', function () {

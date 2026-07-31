@@ -25,7 +25,6 @@ $right = '';
 $renderRows = null;
 $minimap = [];
 $totalRows = 0;
-$stats = ['hunks' => 0, 'replace' => 0, 'delete' => 0, 'insert' => 0];
 $error = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -41,6 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // and the minimap hunk list, computing word-level diffs exactly once
         // per modified line pair instead of once per column.
         $renderRows = [];
+        $hunkStarts = []; // rowIndex => hunkIndex, for the Prev/Next navigation buttons
         foreach ($rows as $r) {
             $blockStart = count($renderRows);
 
@@ -61,8 +61,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'rclass' => 'row-blank', 'rno' => null, 'rtext' => null, 'rseg' => null,
                         ];
                     }
-                    $stats['hunks']++;
-                    $stats['delete'] += count($r['left']);
                     break;
                 case 'insert':
                     foreach ($r['right'] as $rn) {
@@ -71,8 +69,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'rclass' => 'row-ins', 'rno' => $rn['no'], 'rtext' => $rn['text'], 'rseg' => null,
                         ];
                     }
-                    $stats['hunks']++;
-                    $stats['insert'] += count($r['right']);
                     break;
                 case 'replace':
                     $max = max(count($r['left']), count($r['right']));
@@ -89,12 +85,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'rclass' => $rr !== null ? 'row-mod' : 'row-blank', 'rno' => $rr['no'] ?? null, 'rtext' => $rr['text'] ?? null, 'rseg' => $segRight,
                         ];
                     }
-                    $stats['hunks']++;
-                    $stats['replace'] += $max;
                     break;
             }
 
             if ($r['tag'] !== 'equal') {
+                $hunkStarts[$blockStart] = count($minimap);
                 $minimap[] = ['start' => $blockStart, 'count' => count($renderRows) - $blockStart, 'type' => $r['tag']];
             }
         }
@@ -163,10 +158,10 @@ function renderMinimap(array $minimap, int $totalRows): string
         <button type="button" class="swap-btn" id="swap-btn" title="Swap Original/Changed">&#8646; Swap</button>
         <?php if ($renderRows !== null): ?>
             <label><input type="checkbox" id="wrap-toggle"> Wrap long lines</label>
-            <span class="badge badge-eq">Differences: <?= $stats['hunks'] ?></span>
-            <span class="badge badge-mod">Modified: <?= $stats['replace'] ?></span>
-            <span class="badge badge-del">Removed: <?= $stats['delete'] ?></span>
-            <span class="badge badge-ins">Added: <?= $stats['insert'] ?></span>
+            <div class="nav-group">
+                <button type="button" class="nav-btn" id="prev-diff-btn" title="Previous difference">&#8593; Previous</button>
+                <button type="button" class="nav-btn" id="next-diff-btn" title="Next difference">&#8595; Next</button>
+            </div>
         <?php endif; ?>
     </div>
 
@@ -190,8 +185,8 @@ function renderMinimap(array $minimap, int $totalRows): string
             <?php if ($renderRows !== null): ?>
                 <div class="diff-wrap">
                     <div class="diff-col" id="col-left">
-                        <?php foreach ($renderRows as $row): ?>
-                            <div class="diff-row <?= $row['lclass'] ?>">
+                        <?php foreach ($renderRows as $i => $row): ?>
+                            <div class="diff-row <?= $row['lclass'] ?>"<?= isset($hunkStarts[$i]) ? ' id="hunk-left-' . $hunkStarts[$i] . '"' : '' ?>>
                                 <span class="lineno"><?= $row['lno'] ?? '' ?></span>
                                 <span class="code"><?= renderCode($row['ltext'], $row['lseg']) ?></span>
                             </div>
@@ -216,8 +211,8 @@ function renderMinimap(array $minimap, int $totalRows): string
             <?php if ($renderRows !== null): ?>
                 <div class="diff-wrap">
                     <div class="diff-col" id="col-right">
-                        <?php foreach ($renderRows as $row): ?>
-                            <div class="diff-row <?= $row['rclass'] ?>">
+                        <?php foreach ($renderRows as $i => $row): ?>
+                            <div class="diff-row <?= $row['rclass'] ?>"<?= isset($hunkStarts[$i]) ? ' id="hunk-right-' . $hunkStarts[$i] . '"' : '' ?>>
                                 <span class="lineno"><?= $row['rno'] ?? '' ?></span>
                                 <span class="code"><?= renderCode($row['rtext'], $row['rseg']) ?></span>
                             </div>
