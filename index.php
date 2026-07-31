@@ -41,6 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // per modified line pair instead of once per column.
         $renderRows = [];
         $hunkStarts = []; // rowIndex => hunkIndex, for the Prev/Next navigation buttons
+        $hunkData = [];   // hunkIndex => copy-to-left/right metadata for the JS copy buttons
+        $lastLeftNo = 0;
+        $lastRightNo = 0;
         foreach ($rows as $r) {
             $blockStart = count($renderRows);
 
@@ -58,14 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     foreach ($r['left'] as $ln) {
                         $renderRows[] = [
                             'lclass' => 'row-del', 'lno' => $ln['no'], 'ltext' => $ln['text'], 'lseg' => null,
-                            'rclass' => 'row-blank', 'rno' => null, 'rtext' => null, 'rseg' => null,
+                            'rclass' => 'row-blank-del', 'rno' => null, 'rtext' => null, 'rseg' => null,
                         ];
                     }
                     break;
                 case 'insert':
                     foreach ($r['right'] as $rn) {
                         $renderRows[] = [
-                            'lclass' => 'row-blank', 'lno' => null, 'ltext' => null, 'lseg' => null,
+                            'lclass' => 'row-blank-ins', 'lno' => null, 'ltext' => null, 'lseg' => null,
                             'rclass' => 'row-ins', 'rno' => $rn['no'], 'rtext' => $rn['text'], 'rseg' => null,
                         ];
                     }
@@ -81,8 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             [$segLeft, $segRight] = Diff::compareWords($l['text'], $rr['text']);
                         }
                         $renderRows[] = [
-                            'lclass' => $l !== null ? 'row-mod' : 'row-blank', 'lno' => $l['no'] ?? null, 'ltext' => $l['text'] ?? null, 'lseg' => $segLeft,
-                            'rclass' => $rr !== null ? 'row-mod' : 'row-blank', 'rno' => $rr['no'] ?? null, 'rtext' => $rr['text'] ?? null, 'rseg' => $segRight,
+                            'lclass' => $l !== null ? 'row-mod' : 'row-blank-mod', 'lno' => $l['no'] ?? null, 'ltext' => $l['text'] ?? null, 'lseg' => $segLeft,
+                            'rclass' => $rr !== null ? 'row-mod' : 'row-blank-mod', 'rno' => $rr['no'] ?? null, 'rtext' => $rr['text'] ?? null, 'rseg' => $segRight,
                         ];
                     }
                     break;
@@ -91,7 +94,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($r['tag'] !== 'equal') {
                 $hunkStarts[$blockStart] = count($minimap);
                 $minimap[] = ['start' => $blockStart, 'count' => count($renderRows) - $blockStart, 'type' => $r['tag']];
+                $hunkData[] = [
+                    'leftStart' => count($r['left']) > 0 ? ($r['left'][0]['no'] - 1) : $lastLeftNo,
+                    'leftCount' => count($r['left']),
+                    'leftLines' => array_column($r['left'], 'text'),
+                    'rightStart' => count($r['right']) > 0 ? ($r['right'][0]['no'] - 1) : $lastRightNo,
+                    'rightCount' => count($r['right']),
+                    'rightLines' => array_column($r['right'], 'text'),
+                ];
             }
+
+            $lastLeftNo += count($r['left']);
+            $lastRightNo += count($r['right']);
         }
         $totalRows = count($renderRows);
     }
@@ -186,8 +200,10 @@ function renderMinimap(array $minimap, int $totalRows): string
                 <div class="diff-wrap">
                     <div class="diff-col" id="col-left">
                         <?php foreach ($renderRows as $i => $row): ?>
-                            <div class="diff-row <?= $row['lclass'] ?>"<?= isset($hunkStarts[$i]) ? ' id="hunk-left-' . $hunkStarts[$i] . '"' : '' ?>>
+                            <?php $hIdx = $hunkStarts[$i] ?? null; ?>
+                            <div class="diff-row <?= $row['lclass'] ?>"<?= $hIdx !== null ? ' id="hunk-left-' . $hIdx . '"' : '' ?>>
                                 <span class="lineno"><?= $row['lno'] ?? '' ?></span>
+                                <span class="hunk-action"><?php if ($hIdx !== null): ?><button type="button" class="copy-btn" data-hunk="<?= $hIdx ?>" data-dir="right" title="Copy this change to the Changed side">&#9654;</button><?php endif; ?></span>
                                 <span class="code"><?= renderCode($row['ltext'], $row['lseg']) ?></span>
                             </div>
                         <?php endforeach; ?>
@@ -212,8 +228,10 @@ function renderMinimap(array $minimap, int $totalRows): string
                 <div class="diff-wrap">
                     <div class="diff-col" id="col-right">
                         <?php foreach ($renderRows as $i => $row): ?>
-                            <div class="diff-row <?= $row['rclass'] ?>"<?= isset($hunkStarts[$i]) ? ' id="hunk-right-' . $hunkStarts[$i] . '"' : '' ?>>
+                            <?php $hIdx = $hunkStarts[$i] ?? null; ?>
+                            <div class="diff-row <?= $row['rclass'] ?>"<?= $hIdx !== null ? ' id="hunk-right-' . $hIdx . '"' : '' ?>>
                                 <span class="lineno"><?= $row['rno'] ?? '' ?></span>
+                                <span class="hunk-action"><?php if ($hIdx !== null): ?><button type="button" class="copy-btn" data-hunk="<?= $hIdx ?>" data-dir="left" title="Copy this change to the Original side">&#9664;</button><?php endif; ?></span>
                                 <span class="code"><?= renderCode($row['rtext'], $row['rseg']) ?></span>
                             </div>
                         <?php endforeach; ?>
@@ -225,6 +243,9 @@ function renderMinimap(array $minimap, int $totalRows): string
     </div>
 </form>
 
+<?php if ($renderRows !== null): ?>
+<script>window.__hunks = <?= json_encode($hunkData) ?>;</script>
+<?php endif; ?>
 <script src="assets/app.js"></script>
 </body>
 </html>

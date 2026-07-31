@@ -9,6 +9,12 @@
             var reader = new FileReader();
             reader.onload = function (e) {
                 target.value = e.target.result;
+                // The file's content now lives in the textarea; clear the
+                // input so a later resubmission (Swap, Copy, manual edits)
+                // sends the current textarea value instead of re-sending
+                // this original file untouched (the server prefers $_FILES
+                // over the posted textarea field when both are present).
+                input.value = '';
             };
             reader.readAsText(file);
         });
@@ -101,6 +107,35 @@
             });
         }
     }
+
+    // Copy a hunk's lines from one side to the other, then re-run Compare so
+    // the view refreshes with that difference resolved. window.__hunks[N]
+    // holds, per hunk, the 0-based line range and text for each side - the
+    // server already worked out where blank/insertion points fall.
+    document.querySelectorAll('.copy-btn').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var hunk = window.__hunks && window.__hunks[parseInt(btn.getAttribute('data-hunk'), 10)];
+            if (!hunk) return;
+
+            var normalize = function (s) { return s.replace(/\r\n|\r/g, '\n').split('\n'); };
+            var dir = btn.getAttribute('data-dir');
+
+            if (dir === 'right') {
+                var rightTa = document.getElementById('right_text');
+                var rightLines = normalize(rightTa.value);
+                rightLines.splice.apply(rightLines, [hunk.rightStart, hunk.rightCount].concat(hunk.leftLines));
+                rightTa.value = rightLines.join('\n');
+            } else {
+                var leftTa = document.getElementById('left_text');
+                var leftLines = normalize(leftTa.value);
+                leftLines.splice.apply(leftLines, [hunk.leftStart, hunk.leftCount].concat(hunk.rightLines));
+                leftTa.value = leftLines.join('\n');
+            }
+
+            var form = document.getElementById('compare-form');
+            if (form.requestSubmit) form.requestSubmit(); else form.submit();
+        });
+    });
 
     // "Edit" switches a pane back from the diff view to its raw textarea.
     document.querySelectorAll('.edit-btn').forEach(function (btn) {

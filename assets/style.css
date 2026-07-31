@@ -234,7 +234,34 @@ body.wrap-lines .diff-row { white-space: pre-wrap; word-break: break-word; }
 .row-del { background: var(--del); }
 .row-ins { background: var(--ins); }
 .row-mod { background: var(--mod); }
-.row-blank { background: repeating-linear-gradient(45deg, #2a2b2f, #2a2b2f 6px, #26272b 6px, #26272b 12px); }
+
+/* Placeholder rows on the side with no matching line for a hunk. Tinted to
+   match the hunk's own color (instead of a neutral stripe) so both sides
+   read as the same change at a glance. */
+.row-blank-del { background: repeating-linear-gradient(45deg, var(--del), var(--del) 6px, transparent 6px, transparent 12px), var(--panel); }
+.row-blank-ins { background: repeating-linear-gradient(45deg, var(--ins), var(--ins) 6px, transparent 6px, transparent 12px), var(--panel); }
+.row-blank-mod { background: repeating-linear-gradient(45deg, var(--mod), var(--mod) 6px, transparent 6px, transparent 12px), var(--panel); }
+
+.hunk-action {
+    flex: 0 0 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.copy-btn {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 3px;
+    border-radius: 3px;
+}
+.copy-btn:hover {
+    color: #fff;
+    background: var(--pink);
+}
 
 mark {
     background: var(--mark-ins);
@@ -262,5 +289,4 @@ mark {
     .file-btn, .edit-btn { background: #eceef1; }
     .compare-btn { color: #fff; }
     .swap-btn, .nav-btn { color: #202124; }
-    .row-blank { background: repeating-linear-gradient(45deg, #eceef1, #eceef1 6px, #ffffff 6px, #ffffff 12px); }
 }
